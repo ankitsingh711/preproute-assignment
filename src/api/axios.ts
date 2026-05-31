@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://admin-moderator-backend-staging.up.railway.app/api';
+const API_BASE_URL = import.meta.env.PROD
+  ? '/api'
+  : 'https://admin-moderator-backend-staging.up.railway.app/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
