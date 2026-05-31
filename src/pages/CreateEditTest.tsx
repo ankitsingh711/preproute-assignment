@@ -4,13 +4,12 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  ArrowLeft,
   Loader2,
   AlertCircle,
   X,
   ChevronDown,
 } from 'lucide-react';
-import { testService, subjectService, topicService, subTopicService } from '../api/services';
+import { testService, subjectService, topicService, subTopicService, getErrorMessage } from '../api/services';
 import type { Subject, Topic, SubTopic } from '../types';
 
 // ── Zod Schema ──────────────────────────────────────────────────────────────────
@@ -56,8 +55,8 @@ const StepperInput: React.FC<StepperProps> = ({ label, value, onChange, prefixSi
   const displayVal = prefixSign && value >= 0 ? `+${value}` : `${value}`;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '90px' }}>
-      <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>{label}</label>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '110px' }}>
+      <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>{label}</label>
       <div
         style={{
           display: 'flex',
@@ -136,6 +135,156 @@ const StepperInput: React.FC<StepperProps> = ({ label, value, onChange, prefixSi
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+// ── Single-Select Dropdown Component ─────────────────────────────────────────────
+interface SingleSelectProps {
+  label: string;
+  placeholder: string;
+  options: { value: string; label: string }[];
+  selected: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  error?: string;
+}
+
+const SingleSelectDropdown: React.FC<SingleSelectProps> = ({
+  label,
+  placeholder,
+  options,
+  selected,
+  onChange,
+  disabled = false,
+  error,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filtered = options.filter((opt) =>
+    opt.label.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const selectOption = (value: string) => {
+    onChange(value);
+    setIsOpen(false);
+    setSearch('');
+  };
+
+  const selectedLabel = options.find((o) => o.value === selected)?.label || '';
+
+  return (
+    <div className="input-group" ref={dropdownRef} style={{ position: 'relative' }}>
+      <label className="input-label" style={{ fontSize: '14px', fontWeight: 600, color: '#475569', marginBottom: '6px', display: 'block' }}>
+        {label}
+      </label>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 14px',
+          border: error ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
+          borderRadius: '8px',
+          background: disabled ? '#f8fafc' : '#ffffff',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          height: '42px',
+        }}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+      >
+        <span style={{ color: selectedLabel ? '#1e293b' : '#94a3b8', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {selectedLabel || placeholder}
+        </span>
+        <ChevronDown size={16} style={{ color: '#64748b', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+      </div>
+
+      {isOpen && !disabled && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            background: '#ffffff',
+            border: '1.5px solid #cbd5e1',
+            borderRadius: '8px',
+            marginTop: '4px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            zIndex: 200,
+            maxHeight: '220px',
+            overflowY: 'auto',
+            padding: '8px',
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              padding: '6px 10px',
+              border: '1.5px solid #cbd5e1',
+              borderRadius: '6px',
+              fontSize: '13px',
+              outline: 'none',
+              marginBottom: '8px',
+            }}
+            autoFocus
+          />
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {filtered.length === 0 ? (
+              <li style={{ padding: '8px', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>No options found</li>
+            ) : (
+              filtered.map((opt) => (
+                <li
+                  key={opt.value}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    selectOption(opt.value);
+                  }}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    color: '#1e293b',
+                    cursor: 'pointer',
+                    background: selected === opt.value ? '#f0f5ff' : 'transparent',
+                    fontWeight: selected === opt.value ? 600 : 400,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (selected !== opt.value) {
+                      e.currentTarget.style.background = '#f8fafc';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (selected !== opt.value) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  {opt.label}
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+      {error && <span style={{ fontSize: '12px', color: '#ef4444', marginTop: '2px', display: 'block' }}>{error}</span>}
     </div>
   );
 };
@@ -535,23 +684,12 @@ const CreateEditTest: React.FC = () => {
     setFetchError(null);
 
     try {
-      const subjectName =
-        subjects.find((s) => s.id === data.subject)?.name ?? data.subject;
-
-      const topicNames = data.topics
-        .map((tid) => allTopics.find((t) => t.id === tid)?.name)
-        .filter((n): n is string => Boolean(n));
-
-      const subTopicNames = (data.sub_topics ?? [])
-        .map((stid) => allSubTopics.find((st) => st.id === stid)?.name)
-        .filter((n): n is string => Boolean(n));
-
       const payload = {
         name: data.name,
         type: data.type,
-        subject: subjectName,
-        topics: topicNames,
-        sub_topics: subTopicNames,
+        subject: data.subject,
+        topics: data.topics,
+        sub_topics: data.sub_topics ?? [],
         difficulty: data.difficulty,
         correct_marks: data.correct_marks,
         wrong_marks: data.wrong_marks,
@@ -571,8 +709,7 @@ const CreateEditTest: React.FC = () => {
         navigate(`/tests/${newId}/questions`);
       }
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'An unexpected error occurred';
+      const message = getErrorMessage(err);
       setFetchError(`Failed to save test: ${message}`);
     } finally {
       setSubmitting(false);
@@ -659,38 +796,26 @@ const CreateEditTest: React.FC = () => {
           </div>
 
           {/* TWO-COLUMN GRID */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '32px', rowGap: '20px', marginBottom: '28px' }}>
+          <div className="test-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '32px', rowGap: '20px', marginBottom: '28px' }}>
             
             {/* COLUMN 1: SUBJECT SELECT */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>Subject</label>
-              <div style={{ position: 'relative' }}>
-                <select
-                  {...register('subject')}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: errors.subject ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
-                    background: '#ffffff',
-                    color: '#1e293b',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    appearance: 'none',
+            <Controller
+              name="subject"
+              control={control}
+              render={({ field }) => (
+                <SingleSelectDropdown
+                  label="Subject"
+                  placeholder="Choose from Drop-down"
+                  options={subjects.map((s) => ({ value: s.id, label: s.name }))}
+                  selected={field.value}
+                  onChange={(val) => {
+                    field.onChange(val);
+                    setValue('subject', val, { shouldValidate: true });
                   }}
-                >
-                  <option value="">Choose from Drop-down</option>
-                  {subjects.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', color: '#64748b', pointerEvents: 'none' }} />
-              </div>
-              {errors.subject && <span style={{ fontSize: '12px', color: '#ef4444' }}>{errors.subject.message}</span>}
-            </div>
+                  error={errors.subject?.message}
+                />
+              )}
+            />
 
             {/* COLUMN 2: NAME OF TEST INPUT */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -723,7 +848,10 @@ const CreateEditTest: React.FC = () => {
                   placeholder={!selectedSubject ? 'Select subject first' : 'Choose from Drop-down'}
                   options={filteredTopics.map((t) => ({ value: t.id, label: t.name }))}
                   selected={field.value}
-                  onChange={field.onChange}
+                  onChange={(val) => {
+                    field.onChange(val);
+                    setValue('topics', val, { shouldValidate: true });
+                  }}
                   disabled={!selectedSubject}
                   error={errors.topics?.message}
                 />
@@ -740,7 +868,10 @@ const CreateEditTest: React.FC = () => {
                   placeholder={selectedTopics.length === 0 ? 'Select topics first' : 'Choose from Drop-down'}
                   options={filteredSubTopics.map((st) => ({ value: st.id, label: st.name }))}
                   selected={field.value}
-                  onChange={field.onChange}
+                  onChange={(val) => {
+                    field.onChange(val);
+                    setValue('sub_topics', val, { shouldValidate: true });
+                  }}
                   disabled={selectedTopics.length === 0}
                 />
               )}
@@ -812,11 +943,12 @@ const CreateEditTest: React.FC = () => {
           </div>
 
           {/* SECTION: MARKING SCHEME */}
-          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
-            {/* LEFT SIDE: THREE STEPPERS */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }}>Marking Scheme:</span>
-              <div style={{ display: 'flex', gap: '20px' }}>
+          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b' }}>Marking Scheme:</span>
+            
+            <div className="test-section-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '32px', alignItems: 'flex-start' }}>
+              {/* LEFT SIDE: THREE STEPPERS */}
+              <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
                 <Controller
                   name="wrong_marks"
                   control={control}
@@ -839,48 +971,48 @@ const CreateEditTest: React.FC = () => {
                   )}
                 />
               </div>
-            </div>
 
-            {/* RIGHT SIDE: NO OF QUESTIONS & TOTAL MARKS */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '20px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>No of Questions</label>
-                <input
-                  type="number"
-                  placeholder="Ex:250 Marks"
-                  {...register('total_questions')}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: errors.total_questions ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
-                    fontSize: '14px',
-                    background: '#ffffff',
-                    color: '#1e293b',
-                    outline: 'none',
-                    height: '42px',
-                  }}
-                />
-              </div>
+              {/* RIGHT SIDE: NO OF QUESTIONS & TOTAL MARKS */}
+              <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>No of Questions</label>
+                  <input
+                    type="number"
+                    placeholder="Ex: 50"
+                    {...register('total_questions')}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: errors.total_questions ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
+                      fontSize: '14px',
+                      background: '#ffffff',
+                      color: '#1e293b',
+                      outline: 'none',
+                      height: '42px',
+                    }}
+                  />
+                </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>Total Marks</label>
-                <input
-                  type="number"
-                  placeholder="Ex:250 Marks"
-                  {...register('total_marks')}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: errors.total_marks ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
-                    fontSize: '14px',
-                    background: '#ffffff',
-                    color: '#1e293b',
-                    outline: 'none',
-                    height: '42px',
-                  }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>Total Marks</label>
+                  <input
+                    type="number"
+                    placeholder="Ex: 250"
+                    {...register('total_marks')}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: errors.total_marks ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
+                      fontSize: '14px',
+                      background: '#ffffff',
+                      color: '#1e293b',
+                      outline: 'none',
+                      height: '42px',
+                    }}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -950,7 +1082,19 @@ const CreateEditTest: React.FC = () => {
           </div>
         </form>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 768px) {
+          .test-form-grid {
+            grid-template-columns: 1fr !important;
+            row-gap: 16px !important;
+          }
+          .test-section-grid {
+            grid-template-columns: 1fr !important;
+            row-gap: 24px !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };

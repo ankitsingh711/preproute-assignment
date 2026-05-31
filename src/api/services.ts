@@ -1,4 +1,5 @@
-import api from './axios';
+import api, { getErrorMessage } from './axios';
+export { getErrorMessage };
 import type {
   ApiResponse,
   AuthResponse,
