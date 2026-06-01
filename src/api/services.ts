@@ -56,17 +56,11 @@ export const questionService = {
   },
 
   getByIds: async (ids: string[]): Promise<Question[]> => {
-    const questions = await Promise.all(
-      ids.map(async (id) => {
-        try {
-          const response = await api.get<ApiResponse<Question>>(`/questions/${id}`);
-          return response.data.data;
-        } catch {
-          return null;
-        }
-      })
-    );
-    return questions.filter((q): q is Question => q !== null);
+    if (ids.length === 0) return [];
+    const response = await api.post<ApiResponse<Question[]>>('/questions/fetchBulk', {
+      question_ids: ids,
+    });
+    return response.data.data;
   },
 
   createBulk: async (questions: CreateQuestionPayload[]): Promise<ApiResponse<Question[]>> => {
@@ -98,11 +92,22 @@ export const topicService = {
     const response = await api.get<ApiResponse<Topic[]>>('/topics');
     return response.data;
   },
+  getBySubjectId: async (subjectId: string): Promise<ApiResponse<Topic[]>> => {
+    const response = await api.get<ApiResponse<Topic[]>>(`/topics/subject/${subjectId}`);
+    return response.data;
+  },
 };
 
 export const subTopicService = {
   getAll: async (): Promise<ApiResponse<SubTopic[]>> => {
     const response = await api.get<ApiResponse<SubTopic[]>>('/sub-topics');
+    return response.data;
+  },
+  getByTopicIds: async (topicIds: string[]): Promise<ApiResponse<SubTopic[]>> => {
+    if (topicIds.length === 0) return { status: 'success', message: 'No topics provided', data: [] };
+    const response = await api.post<ApiResponse<SubTopic[]>>('/sub-topics/multi-topics', {
+      topicIds,
+    });
     return response.data;
   },
 };

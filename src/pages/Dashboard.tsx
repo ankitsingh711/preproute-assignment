@@ -667,8 +667,6 @@ export default function Dashboard() {
 
   // Reference data inside Edit Modal
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [allTopics, setAllTopics] = useState<Topic[]>([]);
-  const [allSubTopics, setAllSubTopics] = useState<SubTopic[]>([]);
   const [filteredTopics, setFilteredTopics] = useState<Topic[]>([]);
   const [filteredSubTopics, setFilteredSubTopics] = useState<SubTopic[]>([]);
 
@@ -786,20 +784,10 @@ export default function Dashboard() {
     setModalError(null);
 
     try {
-      // Load all reference data
-      const [subjectsRes, topicsRes, subTopicsRes] = await Promise.all([
-        subjectService.getAll(),
-        topicService.getAll(),
-        subTopicService.getAll(),
-      ]);
-
+      // Load subjects
+      const subjectsRes = await subjectService.getAll();
       const subjs = subjectsRes.data;
-      const tops = topicsRes.data;
-      const subTops = subTopicsRes.data;
-
       setSubjects(subjs);
-      setAllTopics(tops);
-      setAllSubTopics(subTops);
 
       // Match Subject name -> UUID
       const matchedSubject = subjs.find(
@@ -807,8 +795,12 @@ export default function Dashboard() {
       );
       const subjectId = matchedSubject?.id ?? '';
 
-      // Topics available for this subject
-      const subjectTopics = tops.filter((t) => t.subject_id === subjectId);
+      // Fetch topics for this subject
+      let subjectTopics: Topic[] = [];
+      if (subjectId) {
+        const topicsRes = await topicService.getBySubjectId(subjectId);
+        subjectTopics = topicsRes.data;
+      }
       setFilteredTopics(subjectTopics);
 
       // Match topic names -> IDs
@@ -821,8 +813,12 @@ export default function Dashboard() {
         })
         .filter((tid): tid is string => Boolean(tid));
 
-      // Subtopics for selected topics
-      const availableSubTopics = subTops.filter((st) => topicIds.includes(st.topic_id));
+      // Fetch subtopics for these topic IDs
+      let availableSubTopics: SubTopic[] = [];
+      if (topicIds.length > 0) {
+        const subTopicsRes = await subTopicService.getByTopicIds(topicIds);
+        availableSubTopics = subTopicsRes.data;
+      }
       setFilteredSubTopics(availableSubTopics);
 
       // Match subtopic names -> IDs
@@ -862,40 +858,73 @@ export default function Dashboard() {
 
   // ── Cascade: subject -> topics ─────────────────────────────────────────────────
   useEffect(() => {
-    if (selectedSubject) {
-      const topics = allTopics.filter((t) => t.subject_id === selectedSubject);
-      setFilteredTopics(topics);
+    let cancelled = false;
 
-      const validTopicIds = new Set(topics.map((t) => t.id));
-      const currentTopics = selectedTopics ?? [];
-      const filtered = currentTopics.filter((tid) => validTopicIds.has(tid));
-      if (filtered.length !== currentTopics.length) {
-        setValue('topics', filtered, { shouldValidate: true });
+    const fetchTopics = async () => {
+      if (selectedSubject) {
+        try {
+          const res = await topicService.getBySubjectId(selectedSubject);
+          if (cancelled) return;
+
+          const topics = res.data;
+          setFilteredTopics(topics);
+
+          // Clear any selected topics that don't belong to this subject
+          const validTopicIds = new Set(topics.map((t) => t.id));
+          const currentTopics = selectedTopics ?? [];
+          const filtered = currentTopics.filter((tid) => validTopicIds.has(tid));
+          if (filtered.length !== currentTopics.length) {
+            setValue('topics', filtered, { shouldValidate: true });
+          }
+        } catch (err) {
+          console.error('Failed to fetch topics:', err);
+        }
+      } else {
+        setFilteredTopics([]);
+        setValue('topics', [], { shouldValidate: true });
       }
-    } else {
-      setFilteredTopics([]);
-      setValue('topics', [], { shouldValidate: true });
-    }
-  }, [selectedSubject, allTopics]);
+    };
+
+    fetchTopics();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSubject, setValue]);
 
   // ── Cascade: topics -> sub-topics ──────────────────────────────────────────────
   useEffect(() => {
-    if (selectedTopics && selectedTopics.length > 0) {
-      const topicIdSet = new Set(selectedTopics);
-      const subs = allSubTopics.filter((st) => topicIdSet.has(st.topic_id));
-      setFilteredSubTopics(subs);
+    let cancelled = false;
 
-      const validSubIds = new Set(subs.map((s) => s.id));
-      const currentSubs = watch('sub_topics') ?? [];
-      const filtered = currentSubs.filter((sid) => validSubIds.has(sid));
-      if (filtered.length !== currentSubs.length) {
-        setValue('sub_topics', filtered, { shouldValidate: true });
+    const fetchSubTopics = async () => {
+      if (selectedTopics && selectedTopics.length > 0) {
+        try {
+          const res = await subTopicService.getByTopicIds(selectedTopics);
+          if (cancelled) return;
+
+          const subs = res.data;
+          setFilteredSubTopics(subs);
+
+          // Clear any selected sub-topics that don't belong to the newly fetched sub-topics
+          const validSubIds = new Set(subs.map((s) => s.id));
+          const currentSubs = watch('sub_topics') ?? [];
+          const filtered = currentSubs.filter((sid) => validSubIds.has(sid));
+          if (filtered.length !== currentSubs.length) {
+            setValue('sub_topics', filtered, { shouldValidate: true });
+          }
+        } catch (err) {
+          console.error('Failed to fetch sub-topics:', err);
+        }
+      } else {
+        setFilteredSubTopics([]);
+        setValue('sub_topics', [], { shouldValidate: true });
       }
-    } else {
-      setFilteredSubTopics([]);
-      setValue('sub_topics', [], { shouldValidate: true });
-    }
-  }, [selectedTopics, allSubTopics]);
+    };
+
+    fetchSubTopics();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTopics, setValue]);
 
   // ── Submit Edit Form ───────────────────────────────────────────────────────────
   const onSubmitEdit = async (data: EditTestFormValues) => {

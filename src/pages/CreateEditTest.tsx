@@ -483,8 +483,6 @@ const CreateEditTest: React.FC = () => {
 
   // Reference data
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [allTopics, setAllTopics] = useState<Topic[]>([]);
-  const [allSubTopics, setAllSubTopics] = useState<SubTopic[]>([]);
 
   // Filtered options
   const [filteredTopics, setFilteredTopics] = useState<Topic[]>([]);
@@ -494,6 +492,7 @@ const CreateEditTest: React.FC = () => {
   const [pageLoading, setPageLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [isDraft, setIsDraft] = useState(false);
 
   const {
     register,
@@ -529,18 +528,10 @@ const CreateEditTest: React.FC = () => {
   // ── Fetch reference data ──────────────────────────────────────────────────────
   const loadReferenceData = useCallback(async () => {
     try {
-      const [subjectsRes, topicsRes, subTopicsRes] = await Promise.all([
-        subjectService.getAll(),
-        topicService.getAll(),
-        subTopicService.getAll(),
-      ]);
+      const subjectsRes = await subjectService.getAll();
       setSubjects(subjectsRes.data);
-      setAllTopics(topicsRes.data);
-      setAllSubTopics(subTopicsRes.data);
       return {
         subjects: subjectsRes.data,
-        topics: topicsRes.data,
-        subTopics: subTopicsRes.data,
       };
     } catch (err) {
       console.error('Failed to load reference data:', err);
@@ -553,7 +544,7 @@ const CreateEditTest: React.FC = () => {
   const loadTestForEdit = useCallback(
     async (
       testId: string,
-      refData: { subjects: Subject[]; topics: Topic[]; subTopics: SubTopic[] }
+      refData: { subjects: Subject[] }
     ) => {
       try {
         const testRes = await testService.getById(testId);
@@ -565,8 +556,12 @@ const CreateEditTest: React.FC = () => {
         );
         const subjectId = matchedSubject?.id ?? '';
 
-        // Get topics available for this subject
-        const subjectTopics = refData.topics.filter((t) => t.subject_id === subjectId);
+        // Fetch topics for this subject
+        let subjectTopics: Topic[] = [];
+        if (subjectId) {
+          const topicsRes = await topicService.getBySubjectId(subjectId);
+          subjectTopics = topicsRes.data;
+        }
 
         // Map topic names → IDs
         const topicIds = test.topics
@@ -578,10 +573,12 @@ const CreateEditTest: React.FC = () => {
           })
           .filter((id): id is string => Boolean(id));
 
-        // Get subtopics for selected topics
-        const availableSubTopics = refData.subTopics.filter((st) =>
-          topicIds.includes(st.topic_id)
-        );
+        // Fetch subtopics for these topic IDs
+        let availableSubTopics: SubTopic[] = [];
+        if (topicIds.length > 0) {
+          const subTopicsRes = await subTopicService.getByTopicIds(topicIds);
+          availableSubTopics = subTopicsRes.data;
+        }
 
         // Map sub_topic names → IDs
         const subTopicIds = (test.sub_topics ?? [])
@@ -644,40 +641,73 @@ const CreateEditTest: React.FC = () => {
 
   // ── Cascade: subject → topics ─────────────────────────────────────────────────
   useEffect(() => {
-    if (selectedSubject) {
-      const topics = allTopics.filter((t) => t.subject_id === selectedSubject);
-      setFilteredTopics(topics);
+    let cancelled = false;
 
-      const validTopicIds = new Set(topics.map((t) => t.id));
-      const currentTopics = selectedTopics ?? [];
-      const filtered = currentTopics.filter((tid) => validTopicIds.has(tid));
-      if (filtered.length !== currentTopics.length) {
-        setValue('topics', filtered, { shouldValidate: true });
+    const fetchTopics = async () => {
+      if (selectedSubject) {
+        try {
+          const res = await topicService.getBySubjectId(selectedSubject);
+          if (cancelled) return;
+
+          const topics = res.data;
+          setFilteredTopics(topics);
+
+          // Clear any selected topics that don't belong to this subject
+          const validTopicIds = new Set(topics.map((t) => t.id));
+          const currentTopics = selectedTopics ?? [];
+          const filtered = currentTopics.filter((tid) => validTopicIds.has(tid));
+          if (filtered.length !== currentTopics.length) {
+            setValue('topics', filtered, { shouldValidate: true });
+          }
+        } catch (err) {
+          console.error('Failed to fetch topics:', err);
+        }
+      } else {
+        setFilteredTopics([]);
+        setValue('topics', [], { shouldValidate: true });
       }
-    } else {
-      setFilteredTopics([]);
-      setValue('topics', [], { shouldValidate: true });
-    }
-  }, [selectedSubject, allTopics]);
+    };
+
+    fetchTopics();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSubject, setValue]);
 
   // ── Cascade: topics → sub-topics ──────────────────────────────────────────────
   useEffect(() => {
-    if (selectedTopics && selectedTopics.length > 0) {
-      const topicIdSet = new Set(selectedTopics);
-      const subs = allSubTopics.filter((st) => topicIdSet.has(st.topic_id));
-      setFilteredSubTopics(subs);
+    let cancelled = false;
 
-      const validSubIds = new Set(subs.map((s) => s.id));
-      const currentSubs = watch('sub_topics') ?? [];
-      const filtered = currentSubs.filter((sid) => validSubIds.has(sid));
-      if (filtered.length !== currentSubs.length) {
-        setValue('sub_topics', filtered, { shouldValidate: true });
+    const fetchSubTopics = async () => {
+      if (selectedTopics && selectedTopics.length > 0) {
+        try {
+          const res = await subTopicService.getByTopicIds(selectedTopics);
+          if (cancelled) return;
+
+          const subs = res.data;
+          setFilteredSubTopics(subs);
+
+          // Clear any selected sub-topics that don't belong to the newly fetched sub-topics
+          const validSubIds = new Set(subs.map((s) => s.id));
+          const currentSubs = watch('sub_topics') ?? [];
+          const filtered = currentSubs.filter((sid) => validSubIds.has(sid));
+          if (filtered.length !== currentSubs.length) {
+            setValue('sub_topics', filtered, { shouldValidate: true });
+          }
+        } catch (err) {
+          console.error('Failed to fetch sub-topics:', err);
+        }
+      } else {
+        setFilteredSubTopics([]);
+        setValue('sub_topics', [], { shouldValidate: true });
       }
-    } else {
-      setFilteredSubTopics([]);
-      setValue('sub_topics', [], { shouldValidate: true });
-    }
-  }, [selectedTopics, allSubTopics]);
+    };
+
+    fetchSubTopics();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTopics, setValue]);
 
   const onSubmit = async (data: TestFormValues) => {
     setSubmitting(true);
@@ -697,16 +727,25 @@ const CreateEditTest: React.FC = () => {
         total_questions: data.total_questions,
         total_marks: data.total_marks,
         total_time: data.total_time,
+        status: 'draft',
         ...(data.type === 'pyq' && data.slot != null ? { slot: data.slot } : {}),
       };
 
       if (isEditMode && id) {
         await testService.update(id, payload);
-        navigate(`/tests/${id}/questions`);
+        if (isDraft) {
+          navigate('/dashboard');
+        } else {
+          navigate(`/tests/${id}/questions`);
+        }
       } else {
         const res = await testService.create(payload);
         const newId = res.data.id;
-        navigate(`/tests/${newId}/questions`);
+        if (isDraft) {
+          navigate('/dashboard');
+        } else {
+          navigate(`/tests/${newId}/questions`);
+        }
       }
     } catch (err: unknown) {
       const message = getErrorMessage(err);
@@ -1061,6 +1100,24 @@ const CreateEditTest: React.FC = () => {
             </button>
             <button
               type="submit"
+              onClick={() => setIsDraft(true)}
+              disabled={submitting}
+              style={{
+                padding: '10px 24px',
+                borderRadius: '8px',
+                border: '1.5px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#475569',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Save as Draft
+            </button>
+            <button
+              type="submit"
+              onClick={() => setIsDraft(false)}
               disabled={submitting}
               style={{
                 padding: '10px 28px',
@@ -1077,7 +1134,7 @@ const CreateEditTest: React.FC = () => {
               }}
             >
               {submitting && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />}
-              Next
+              Next: Add Questions
             </button>
           </div>
         </form>

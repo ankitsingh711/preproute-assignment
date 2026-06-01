@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -386,8 +387,6 @@ export default function AddQuestions() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editModalLoading, setEditModalLoading] = useState(false);
   const [editModalError, setEditModalError] = useState<string | null>(null);
-  const [allTopics, setAllTopics] = useState<Topic[]>([]);
-  const [allSubTopics, setAllSubTopics] = useState<SubTopic[]>([]);
   const [filteredTopics, setFilteredTopics] = useState<Topic[]>([]);
   const [filteredSubTopics, setFilteredSubTopics] = useState<SubTopic[]>([]);
 
@@ -487,30 +486,34 @@ export default function AddQuestions() {
     setEditModalError(null);
 
     try {
-      const [topicsRes, subTopicsRes] = await Promise.all([
-        topicService.getAll(),
-        subTopicService.getAll(),
-      ]);
-
-      setAllTopics(topicsRes.data);
-      setAllSubTopics(subTopicsRes.data);
-
       // Match Subject name -> UUID
       const matchedSubject = subjects.find(
         (s) => s.name.toLowerCase() === test.subject.toLowerCase()
       );
       const subjectId = matchedSubject?.id ?? '';
 
-      const subjectTopics = topicsRes.data.filter((t) => t.subject_id === subjectId);
+      // Fetch topics for this subject
+      let subjectTopics: Topic[] = [];
+      if (subjectId) {
+        const topicsRes = await topicService.getBySubjectId(subjectId);
+        subjectTopics = topicsRes.data;
+      }
       setFilteredTopics(subjectTopics);
 
+      // Match topic names -> IDs
       const topicIds = test.topics
         .map((topicName) => subjectTopics.find((t) => t.name.toLowerCase() === topicName.toLowerCase())?.id)
         .filter((tid): tid is string => Boolean(tid));
 
-      const availableSubTopics = subTopicsRes.data.filter((st) => topicIds.includes(st.topic_id));
+      // Fetch subtopics for these topic IDs
+      let availableSubTopics: SubTopic[] = [];
+      if (topicIds.length > 0) {
+        const subTopicsRes = await subTopicService.getByTopicIds(topicIds);
+        availableSubTopics = subTopicsRes.data;
+      }
       setFilteredSubTopics(availableSubTopics);
 
+      // Match subtopic names -> IDs
       const subTopicIds = (test.sub_topics ?? [])
         .map((stName) => availableSubTopics.find((st) => st.name.toLowerCase() === stName.toLowerCase())?.id)
         .filter((sid): sid is string => Boolean(sid));
@@ -541,18 +544,72 @@ export default function AddQuestions() {
 
   // Cascades inside Edit Test Modal
   useEffect(() => {
-    if (editSubject) {
-      const topics = allTopics.filter((t) => t.subject_id === editSubject);
-      setFilteredTopics(topics);
-    }
-  }, [editSubject, allTopics]);
+    let cancelled = false;
+
+    const fetchTopics = async () => {
+      if (editSubject) {
+        try {
+          const res = await topicService.getBySubjectId(editSubject);
+          if (cancelled) return;
+
+          const topics = res.data;
+          setFilteredTopics(topics);
+
+          // Clear any selected topics that don't belong to this subject
+          const validTopicIds = new Set(topics.map((t) => t.id));
+          const currentTopics = editTopics ?? [];
+          const filtered = currentTopics.filter((tid) => validTopicIds.has(tid));
+          if (filtered.length !== currentTopics.length) {
+            setValueE('topics', filtered, { shouldValidate: true });
+          }
+        } catch (err) {
+          console.error('Failed to fetch topics:', err);
+        }
+      } else {
+        setFilteredTopics([]);
+        setValueE('topics', [], { shouldValidate: true });
+      }
+    };
+
+    fetchTopics();
+    return () => {
+      cancelled = true;
+    };
+  }, [editSubject, setValueE]);
 
   useEffect(() => {
-    if (editTopics && editTopics.length > 0) {
-      const subs = allSubTopics.filter((st) => editTopics.includes(st.topic_id));
-      setFilteredSubTopics(subs);
-    }
-  }, [editTopics, allSubTopics]);
+    let cancelled = false;
+
+    const fetchSubTopics = async () => {
+      if (editTopics && editTopics.length > 0) {
+        try {
+          const res = await subTopicService.getByTopicIds(editTopics);
+          if (cancelled) return;
+
+          const subs = res.data;
+          setFilteredSubTopics(subs);
+
+          // Clear any selected sub-topics that don't belong to the newly fetched sub-topics
+          const validSubIds = new Set(subs.map((s) => s.id));
+          const currentSubs = watchE('sub_topics') ?? [];
+          const filtered = currentSubs.filter((sid) => validSubIds.has(sid));
+          if (filtered.length !== currentSubs.length) {
+            setValueE('sub_topics', filtered, { shouldValidate: true });
+          }
+        } catch (err) {
+          console.error('Failed to fetch sub-topics:', err);
+        }
+      } else {
+        setFilteredSubTopics([]);
+        setValueE('sub_topics', [], { shouldValidate: true });
+      }
+    };
+
+    fetchSubTopics();
+    return () => {
+      cancelled = true;
+    };
+  }, [editTopics, setValueE]);
 
   // Submit Edit Test Form
   const onSubmitEditTest = async (data: EditTestFormValues) => {
@@ -647,6 +704,15 @@ export default function AddQuestions() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSaveAndContinue = () => {
+    if (!id) return;
+    if (!test || !test.questions || test.questions.length === 0) {
+      toast.error('Minimum 1 question required to proceed.');
+      return;
+    }
+    navigate(`/tests/${id}/preview`);
   };
 
   if (loading) {
@@ -1085,7 +1151,7 @@ export default function AddQuestions() {
               
               <button
                 type="button"
-                onClick={() => navigate(`/tests/${id}/preview`)}
+                onClick={handleSaveAndContinue}
                 style={{
                   background: '#5882eb',
                   color: '#ffffff',
@@ -1097,7 +1163,7 @@ export default function AddQuestions() {
                   cursor: 'pointer',
                 }}
               >
-                Next
+                Save & Continue
               </button>
             </div>
           </footer>
