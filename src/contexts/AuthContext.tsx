@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import type { User } from '../types';
-import { authService } from '../api/services';
+import { authService, clearCache } from '../api/services';
 
 interface AuthContextType {
   user: User | null;
@@ -42,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    clearCache();
   };
 
   return (
